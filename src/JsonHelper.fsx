@@ -1,4 +1,4 @@
-module CitHelpers.Json
+module Cit.Helpers.Json
 
 open Newtonsoft.Json.Linq
 

@@ -12,9 +12,9 @@ type ParameterValue = { value : string } static member Create value = { value = 
 type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
-type DeploymentStatus = InProgress of state:string * operations:int | Error of statusCode:string * message:string | Completed of deployment:IDeployment * DeploymentOutputs
+type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:IDeployment * DeploymentOutputs
 
-let (|Accepted|Running|Succeeded|Failed|Other|) = function
+let private (|Accepted|Running|Succeeded|Failed|Other|) = function
     | "Accepted" -> Accepted
     | "Running" -> Running
     | "Failed" -> Failed
@@ -41,7 +41,7 @@ let private toDeploymentOutputs : obj -> DeploymentOutputs = function
 let rec deployTemplate (deployment:IDeployment) = seq {
     let deployment = deployment.Refresh()
     let operations = deployment.DeploymentOperations.List() |> Seq.toArray
-    yield InProgress(deployment.ProvisioningState, operations.Length)
+    yield DeploymentInProgress(deployment.ProvisioningState, operations.Length)
     match deployment.ProvisioningState with
     | Running | Accepted | Other _ ->            
         Async.Sleep 5000 |> Async.RunSynchronously
@@ -53,9 +53,9 @@ let rec deployTemplate (deployment:IDeployment) = seq {
                 match operation.ProvisioningState with
                 | Failed -> Some(operation.StatusCode, string operation.StatusMessage)
                 | _ -> None)
-            |> Seq.map Error
+            |> Seq.map DeploymentError
         failwith "Failed to complete deployment successfully."
-    | Succeeded -> yield Completed (deployment, deployment.Outputs |> toDeploymentOutputs) }
+    | Succeeded -> yield DeploymentCompleted (deployment, deployment.Outputs |> toDeploymentOutputs) }
 
 /// Creates parameters from key/value string pairs used by the Fluent API.
 let buildArmParameters keyValues =
