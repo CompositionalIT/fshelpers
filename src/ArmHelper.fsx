@@ -61,6 +61,7 @@ let rec deployTemplate (deployment:IDeployment) = seq {
 let buildArmParameters keyValues =
     keyValues
     |> Seq.map(fun (k, v) -> k, ParameterValue.Create v)
+    |> dict
     |> JsonConvert.SerializeObject
 
 
