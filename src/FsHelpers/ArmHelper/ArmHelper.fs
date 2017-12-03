@@ -35,14 +35,14 @@ let private toDeploymentOutputs : obj -> DeploymentOutputs = function
     | _ -> failwith "Unknown output type!"
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
-let rec deployTemplateWithStatus (deployment:IDeployment) = seq {
+let rec monitorDeploymentWithStatus (deployment:IDeployment) = seq {
     let deployment = deployment.Refresh()
     let operations = deployment.DeploymentOperations.List() |> Seq.toArray
     yield DeploymentInProgress(deployment.ProvisioningState, operations.Length)
     match deployment.ProvisioningState with
     | Running | Accepted | Other _ ->            
         Async.Sleep 5000 |> Async.RunSynchronously
-        yield! deployTemplateWithStatus deployment
+        yield! monitorDeploymentWithStatus deployment
     | Failed ->
         yield!
             operations
@@ -55,8 +55,8 @@ let rec deployTemplateWithStatus (deployment:IDeployment) = seq {
     | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
 /// Deploys an ARM template, returning any outputs.
-let deployTemplate : IDeployment -> _ =
-    deployTemplateWithStatus
+let monitorDeployment : IDeployment -> _ =
+    monitorDeploymentWithStatus
     >> Seq.choose(function | DeploymentCompleted outputs -> Some outputs | DeploymentError _ | DeploymentInProgress _ -> None)
     >> Seq.head
 
