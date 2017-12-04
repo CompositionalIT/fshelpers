@@ -2,6 +2,7 @@ module Cit.Helpers.Arm
 
 open Microsoft.Azure.Management.ResourceManager.Fluent
 open Microsoft.Azure.Management.ResourceManager.Fluent.Authentication
+open Microsoft.Azure.Management.ResourceManager.Fluent.Deployment.Definition
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open System
@@ -11,60 +12,97 @@ type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
 type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:DeploymentOutputs
+type DeploymentMode = Complete | Incremental member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
+type ResourceGroupType = New of string | Existing of string member this.Name = match this with New s | Existing s -> s
+type Deployment =
+    { DeploymentName : string
+      ResourceGroup : ResourceGroupType
+      ArmTemplate : string
+      Parameters : (string * string) list
+      DeploymentMode : DeploymentMode }
+type AuthenticatedContext = AuthenticatedContext of IResourceManager
 
-let private (|Accepted|Running|Succeeded|Failed|Other|) = function
-    | "Accepted" -> Accepted
-    | "Running" -> Running
-    | "Failed" -> Failed
-    | "Succeeded" -> Succeeded
-    | other -> Other other
+[<AutoOpen>]
+module private Helpers =
+    let (|Accepted|Running|Succeeded|Failed|Other|) = function
+        | "Accepted" -> Accepted
+        | "Running" -> Running
+        | "Failed" -> Failed
+        | "Succeeded" -> Succeeded
+        | other -> Other other
+
+    /// Creates parameters from key/value string pairs used by the Fluent API.
+    let buildArmParameters keyValues =
+        keyValues
+        |> Seq.map(fun (k, v) -> k, ParameterValue.Create v)
+        |> dict
+        |> JsonConvert.SerializeObject
+
+    let toDeploymentOutputs : obj -> DeploymentOutputs = function
+        | :? JObject as outputs ->
+            outputs
+            |> string
+            |> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>>
+            |> Map.map(fun _ v -> v.Value)
+        | _ -> failwith "Unknown output type!"
+
+    let rec monitorDeployment (deployment:IDeployment) = seq {
+        let deployment = deployment.Refresh()
+        let operations = deployment.DeploymentOperations.List() |> Seq.toArray
+        yield DeploymentInProgress(deployment.ProvisioningState, operations.Length)
+        match deployment.ProvisioningState with
+        | Running | Accepted | Other _ ->            
+            Async.Sleep 5000 |> Async.RunSynchronously
+            yield! monitorDeployment deployment
+        | Failed ->
+            yield!
+                operations
+                |> Array.choose(fun operation ->
+                    match operation.ProvisioningState with
+                    | Failed -> Some(operation.StatusCode, string operation.StatusMessage)
+                    | _ -> None)
+                |> Seq.map DeploymentError
+            failwith "Failed to complete deployment successfully."
+        | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
+
+    let create deployment (AuthenticatedContext resourceManager) =
+        resourceManager
+            .Deployments
+            .Define(deployment.DeploymentName)
+            .WithExistingResourceGroup(deployment.ResourceGroup.Name)
+            .WithTemplate(deployment.ArmTemplate)
+            .WithParameters(buildArmParameters deployment.Parameters)
+            .WithMode(deployment.DeploymentMode.AsFluent)
 
 /// Authenticates to Azure using the supplied credentials for a specific subscription.
-let authenticateToAzure credentials (subscriptionId:Guid) =
+let authenticate credentials (subscriptionId:Guid) =
     let spi = AzureCredentialsFactory().FromServicePrincipal(string credentials.ClientId, credentials.ClientSecret, string credentials.TenantId, AzureEnvironment.AzureGlobalCloud)
     ResourceManager
         .Authenticate(spi)
         .WithSubscription(string subscriptionId)
-
-let private toDeploymentOutputs : obj -> DeploymentOutputs = function
-    | :? JObject as outputs ->
-        outputs
-        |> string
-        |> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>>
-        |> Map.map(fun _ v -> v.Value)
-    | _ -> failwith "Unknown output type!"
+        |> AuthenticatedContext
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
-let rec monitorDeploymentWithStatus (deployment:IDeployment) = seq {
-    let deployment = deployment.Refresh()
-    let operations = deployment.DeploymentOperations.List() |> Seq.toArray
-    yield DeploymentInProgress(deployment.ProvisioningState, operations.Length)
-    match deployment.ProvisioningState with
-    | Running | Accepted | Other _ ->            
-        Async.Sleep 5000 |> Async.RunSynchronously
-        yield! monitorDeploymentWithStatus deployment
-    | Failed ->
-        yield!
-            operations
-            |> Array.choose(fun operation ->
-                match operation.ProvisioningState with
-                | Failed -> Some(operation.StatusCode, string operation.StatusMessage)
-                | _ -> None)
-            |> Seq.map DeploymentError
-        failwith "Failed to complete deployment successfully."
-    | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
+let deployWithProgress deployment =
+    create deployment
+    >> fun fluent -> fluent.BeginCreate()
+    >> monitorDeployment
 
 /// Deploys an ARM template, returning any outputs.
-let monitorDeployment : IDeployment -> _ =
-    monitorDeploymentWithStatus
+let deploy deployment =
+    deployWithProgress deployment
     >> Seq.choose(function | DeploymentCompleted outputs -> Some outputs | DeploymentError _ | DeploymentInProgress _ -> None)
     >> Seq.head
 
-/// Creates parameters from key/value string pairs used by the Fluent API.
-let buildArmParameters keyValues =
-    keyValues
-    |> Seq.map(fun (k, v) -> k, ParameterValue.Create v)
-    |> dict
-    |> JsonConvert.SerializeObject
+/// Creates an basic deployment using the supplied arguments.
+let createSimple name resourceGroup template parameters =
+    { DeploymentName = name
+      ResourceGroup = New resourceGroup
+      ArmTemplate = template
+      Parameters = parameters
+      DeploymentMode = DeploymentMode.Incremental }
 
-
+/// Creates and executes a basic deployment using the supplied arguments.
+let deploySimple name resourceGroup template parameters =
+    createSimple name resourceGroup template parameters
+    |> deploy
