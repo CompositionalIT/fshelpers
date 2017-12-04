@@ -65,7 +65,7 @@ module private Helpers =
             failwith "Failed to complete deployment successfully."
         | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
-    let create deployment (AuthenticatedContext resourceManager) =
+    let create (AuthenticatedContext resourceManager) deployment =
         resourceManager
             .Deployments
             .Define(deployment.DeploymentName)
@@ -83,14 +83,14 @@ let authenticate credentials (subscriptionId:Guid) =
         |> AuthenticatedContext
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
-let deployWithProgress deployment =
-    create deployment
+let deployWithProgress authContext =
+    create authContext
     >> fun fluent -> fluent.BeginCreate()
     >> monitorDeployment
 
 /// Deploys an ARM template, returning any outputs.
-let deploy deployment =
-    deployWithProgress deployment
+let deploy authContext =
+    deployWithProgress authContext
     >> Seq.choose(function | DeploymentCompleted outputs -> Some outputs | DeploymentError _ | DeploymentInProgress _ -> None)
     >> Seq.head
 
@@ -103,6 +103,6 @@ let createSimple name resourceGroup template parameters =
       DeploymentMode = DeploymentMode.Incremental }
 
 /// Creates and executes a basic deployment using the supplied arguments.
-let deploySimple name resourceGroup template parameters =
+let deploySimple name resourceGroup template parameters auth =
     createSimple name resourceGroup template parameters
-    |> deploy
+    |> deploy auth
