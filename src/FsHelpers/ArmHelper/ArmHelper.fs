@@ -2,18 +2,23 @@ module Cit.Helpers.Arm
 
 open Microsoft.Azure.Management.ResourceManager.Fluent
 open Microsoft.Azure.Management.ResourceManager.Fluent.Authentication
-open Microsoft.Azure.Management.ResourceManager.Fluent.Deployment.Definition
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open System
 
-type ParameterValue = { value : string } static member Create value = { value = value }
+type ParameterValue =
+    { value : string }
+    static member Create value = { value = value }
 type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
 type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:DeploymentOutputs
-type DeploymentMode = Complete | Incremental member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
-type ResourceGroupType = New of string | Existing of string member this.Name = match this with New s | Existing s -> s
+type DeploymentMode =
+    | Complete | Incremental
+    member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
+type ResourceGroupType =
+    | New of string | Existing of string
+    member this.Name = match this with New s | Existing s -> s
 type Deployment =
     { DeploymentName : string
       ResourceGroup : ResourceGroupType
@@ -68,7 +73,7 @@ module private Helpers =
     let create (AuthenticatedContext resourceManager) deployment =
         resourceManager
             .Deployments
-            .Define(deployment.DeploymentName)
+            .Define(deployment.DeploymentName.Replace(" ", "_"))
             .WithExistingResourceGroup(deployment.ResourceGroup.Name)
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(buildArmParameters deployment.Parameters)
