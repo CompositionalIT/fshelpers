@@ -6,9 +6,20 @@ open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open System
 
-type ParameterValue =
-    { value : string }
-    static member Create value = { value = value }
+module Serialization =
+    type ArmParameter =
+    | ArmString of string
+    | ArmInt of int
+    | ArmBool of bool
+    | ArmArray of ArmParameter list
+    | ArmObject of (string * ArmParameter) list
+    let rec getArmParameterValue = function
+        | ArmString s -> box s
+        | ArmInt i -> box i
+        | ArmBool b -> box b
+        | ArmArray o -> o |> List.map getArmParameterValue |> box
+        | ArmObject o -> o |> List.map(fun (k, v) -> (k, getArmParameterValue v)) |> Map |> box
+
 type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
@@ -23,12 +34,11 @@ type Deployment =
     { DeploymentName : string
       ResourceGroup : ResourceGroupType
       ArmTemplate : string
-      Parameters : (string * string) list
+      Parameters : (string * Serialization.ArmParameter) list
       DeploymentMode : DeploymentMode }
 type AuthenticatedContext = AuthenticatedContext of IResourceManager
 
-[<AutoOpen>]
-module private Helpers =
+module Internal =
     let (|Accepted|Running|Succeeded|Failed|Other|) = function
         | "Accepted" -> Accepted
         | "Running" -> Running
@@ -39,8 +49,8 @@ module private Helpers =
     /// Creates parameters from key/value string pairs used by the Fluent API.
     let buildArmParameters keyValues =
         keyValues
-        |> Seq.map(fun (k, v) -> k, ParameterValue.Create v)
-        |> dict
+        |> Serialization.ArmObject
+        |> Serialization.getArmParameterValue
         |> JsonConvert.SerializeObject
 
     let toDeploymentOutputs : obj -> DeploymentOutputs = function
@@ -71,13 +81,16 @@ module private Helpers =
         | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
     let create (AuthenticatedContext resourceManager) deployment =
+        let parameters = buildArmParameters deployment.Parameters
         resourceManager
             .Deployments
             .Define(deployment.DeploymentName.Replace(" ", "_"))
             .WithExistingResourceGroup(deployment.ResourceGroup.Name)
             .WithTemplate(deployment.ArmTemplate)
-            .WithParameters(buildArmParameters deployment.Parameters)
+            .WithParameters(parameters)
             .WithMode(deployment.DeploymentMode.AsFluent)
+
+open Internal
 
 /// Authenticates to Azure using the supplied credentials for a specific subscription.
 let authenticate credentials (subscriptionId:Guid) =
