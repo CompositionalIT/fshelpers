@@ -6,19 +6,19 @@ open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open System
 
-module Serialization =
+module Parameters =
+    type ParameterValue<'T> = { value : 'T }
+    let toPValue v = { value = v }
+    let private toBoxedPValue v = v |> toPValue |> box
     type ArmParameter =
     | ArmString of string
     | ArmInt of int
     | ArmBool of bool
-    | ArmArray of ArmParameter list
-    | ArmObject of (string * ArmParameter) list
+    type ParameterType = Simple of (string * ArmParameter) list | Typed of obj
     let rec getArmParameterValue = function
-        | ArmString s -> box s
-        | ArmInt i -> box i
-        | ArmBool b -> box b
-        | ArmArray o -> o |> List.map getArmParameterValue |> box
-        | ArmObject o -> o |> List.map(fun (k, v) -> (k, getArmParameterValue v)) |> Map |> box
+        | ArmString s -> toBoxedPValue s
+        | ArmInt i -> toBoxedPValue i
+        | ArmBool b -> toBoxedPValue b
 
 type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
@@ -34,7 +34,7 @@ type Deployment =
     { DeploymentName : string
       ResourceGroup : ResourceGroupType
       ArmTemplate : string
-      Parameters : (string * Serialization.ArmParameter) list
+      Parameters : Parameters.ParameterType
       DeploymentMode : DeploymentMode }
 type AuthenticatedContext = AuthenticatedContext of IResourceManager
 
@@ -49,8 +49,8 @@ module Internal =
     /// Creates parameters from key/value string pairs used by the Fluent API.
     let buildArmParameters keyValues =
         keyValues
-        |> Serialization.ArmObject
-        |> Serialization.getArmParameterValue
+        |> List.map (fun (k, v) -> k, Parameters.getArmParameterValue v)
+        |> Map
         |> JsonConvert.SerializeObject
 
     let toDeploymentOutputs : obj -> DeploymentOutputs = function
@@ -81,7 +81,10 @@ module Internal =
         | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
     let create (AuthenticatedContext resourceManager) deployment =
-        let parameters = buildArmParameters deployment.Parameters
+        let parameters =
+            match deployment.Parameters with
+            | Parameters.Simple parameters -> buildArmParameters parameters
+            | Parameters.Typed object -> JsonConvert.SerializeObject object
         resourceManager
             .Deployments
             .Define(deployment.DeploymentName.Replace(" ", "_"))
