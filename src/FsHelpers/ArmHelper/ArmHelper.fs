@@ -28,8 +28,7 @@ type DeploymentMode =
     | Complete | Incremental
     member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
 type ResourceGroupType =
-    | New of string | Existing of string
-    member this.Name = match this with New s | Existing s -> s
+    | New of name:string * Core.Region | Existing of name:string
 type Deployment =
     { DeploymentName : string
       ResourceGroup : ResourceGroupType
@@ -85,10 +84,16 @@ module Internal =
             match deployment.Parameters with
             | Parameters.Simple parameters -> buildArmParameters parameters
             | Parameters.Typed object -> JsonConvert.SerializeObject object
-        resourceManager
-            .Deployments
-            .Define(deployment.DeploymentName.Replace(" ", "_"))
-            .WithExistingResourceGroup(deployment.ResourceGroup.Name)
+        let withTemplate =
+            let definition =
+                resourceManager
+                    .Deployments
+                    .Define(deployment.DeploymentName.Replace(" ", "_"))
+            match deployment.ResourceGroup with
+            | New (name, region) -> definition.WithNewResourceGroup(name, region)
+            | Existing name -> definition.WithExistingResourceGroup(name)
+
+        withTemplate            
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(parameters)
             .WithMode(deployment.DeploymentMode.AsFluent)
@@ -116,14 +121,14 @@ let deploy authContext =
     >> Seq.head
 
 /// Creates an basic deployment using the supplied arguments.
-let createSimple name resourceGroup template parameters =
+let createSimple name resourceGroup region template parameters =
     { DeploymentName = name
-      ResourceGroup = New resourceGroup
+      ResourceGroup = New(resourceGroup, region)
       ArmTemplate = template
       Parameters = parameters
-      DeploymentMode = DeploymentMode.Incremental }
+      DeploymentMode = Incremental }
 
 /// Creates and executes a basic deployment using the supplied arguments.
-let deploySimple name resourceGroup template parameters auth =
-    createSimple name resourceGroup template parameters
+let deploySimple name resourceGroup region template parameters auth =
+    createSimple name resourceGroup region template parameters
     |> deploy auth
