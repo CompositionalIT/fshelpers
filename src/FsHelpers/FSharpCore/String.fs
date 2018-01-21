@@ -1,4 +1,4 @@
-module FSharp.Core.String
+module String
 
 open System
 
