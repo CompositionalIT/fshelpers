@@ -23,6 +23,7 @@ module Parameters =
 type OutputResult = { Type : string; Value : string }
 type DeploymentOutputs = Map<string, string>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
+type DeviceAuthenticationCredentials = { ClientId : Guid; TenantId : Guid option }
 type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:DeploymentOutputs
 type DeploymentMode =
     | Complete | Incremental
@@ -84,6 +85,11 @@ module Internal =
             match deployment.Parameters with
             | Parameters.Simple parameters -> buildArmParameters parameters
             | Parameters.Typed object -> JsonConvert.SerializeObject object
+        match deployment.ResourceGroup with
+        | ResourceGroupType.New(name, region) ->
+            resourceManager.ResourceGroups.Define(name).WithRegion(region).Create() |> ignore
+        | _ -> ()
+
         let withTemplate =
             let definition =
                 resourceManager
@@ -99,14 +105,36 @@ module Internal =
             .WithMode(deployment.DeploymentMode.AsFluent)
 
 open Internal
+open Microsoft.Azure.Management.ResourceManager.Fluent.Core
+open Microsoft.Rest
+open Microsoft.IdentityModel.Clients.ActiveDirectory
 
 /// Authenticates to Azure using the supplied credentials for a specific subscription.
-let authenticate credentials (subscriptionId:Guid) =
+let authenticate (credentials:AuthenticationCredentials) (subscriptionId:Guid) =
     let spi = AzureCredentialsFactory().FromServicePrincipal(string credentials.ClientId, credentials.ClientSecret, string credentials.TenantId, AzureEnvironment.AzureGlobalCloud)
     ResourceManager
         .Authenticate(spi)
         .WithSubscription(string subscriptionId)
         |> AuthenticatedContext
+
+/// Authenticates a device to Azure which either doesn't have a web browser or doesn't have a mechanism for user input. Examples of these
+/// include either terminals or IoT devices
+let authenticateDevice (showMessagePrompt:string -> unit) credentials (subscriptionId:Guid) =
+    let authority =
+        sprintf "https://login.microsoftonline.com/%s" (match credentials.TenantId with Some tId -> tId.ToString() | None -> "common")
+    let adalClient = AuthenticationContext(authority)
+    async {
+        let! deviceCode = adalClient.AcquireDeviceCodeAsync("https://management.core.windows.net/", string credentials.ClientId) |> Async.AwaitTask
+        showMessagePrompt deviceCode.Message
+        let! accessToken = adalClient.AcquireTokenByDeviceCodeAsync(deviceCode) |> Async.AwaitTask
+        let restClient =
+            RestClient.Configure()
+                      .WithEnvironment(AzureEnvironment.AzureGlobalCloud)
+                      .WithCredentials(new TokenCredentials(accessToken.AccessToken))
+                      .Build()
+        return
+            ResourceManager.Authenticate(restClient).WithSubscription(string subscriptionId) |> AuthenticatedContext
+    }
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
 let deployWithProgress authContext =
