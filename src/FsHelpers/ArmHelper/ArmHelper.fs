@@ -56,7 +56,7 @@ module Internal =
         | :? JObject as outputs ->
             outputs
             |> string
-            |> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>>
+            |> fun s -> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>> s
             |> Map.map(fun _ v -> v.Value)
         | _ -> failwith "Unknown output type!"
 
@@ -83,7 +83,7 @@ module Internal =
         let parameters =
             match deployment.Parameters with
             | Parameters.Simple parameters -> buildArmParameters parameters
-            | Parameters.Typed object -> JsonConvert.SerializeObject object
+            | Parameters.Typed o -> JsonConvert.SerializeObject o
         let withTemplate =
             let definition =
                 resourceManager
