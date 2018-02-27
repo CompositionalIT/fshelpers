@@ -20,10 +20,10 @@ module Parameters =
         | ArmInt i -> toBoxedPValue i
         | ArmBool b -> toBoxedPValue b
 
-type OutputResult = { Type : string; Value : string }
-type DeploymentOutputs = Map<string, string>
+type DeploymentOutputs<'T> = Map<string, Parameters.ParameterValue<'T>>
+type SimpleOutput = DeploymentOutputs<obj>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
-type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:DeploymentOutputs
+type DeploymentStatus<'T> = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:'T
 type DeploymentMode =
     | Complete | Incremental
     member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
@@ -52,12 +52,11 @@ module Internal =
         |> Map
         |> JsonConvert.SerializeObject
 
-    let toDeploymentOutputs : obj -> DeploymentOutputs = function
+    let toDeploymentOutputs : obj -> _ = function
         | :? JObject as outputs ->
             outputs
             |> string
-            |> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>>
-            |> Map.map(fun _ v -> v.Value)
+            |> Newtonsoft.Json.JsonConvert.DeserializeObject<'T>
         | _ -> failwith "Unknown output type!"
 
     let rec monitorDeployment (deployment:IDeployment) = seq {
