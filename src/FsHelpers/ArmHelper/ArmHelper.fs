@@ -56,7 +56,8 @@ module Internal =
         | :? JObject as outputs ->
             outputs
             |> string
-            |> fun s -> Newtonsoft.Json.JsonConvert.DeserializeObject<'T> s
+            |> fun s -> Some(Newtonsoft.Json.JsonConvert.DeserializeObject<'T> s)
+        | null -> None
         | _ -> failwith "Unknown output type!"
 
     let rec monitorDeployment (deployment:IDeployment) = seq {
@@ -78,20 +79,23 @@ module Internal =
             failwith "Failed to complete deployment successfully."
         | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
-    let create (AuthenticatedContext resourceManager) deployment =
+    let buildDefinition (AuthenticatedContext resourceManager) deployment =
         let parameters =
             match deployment.Parameters with
             | Parameters.Simple parameters -> buildArmParameters parameters
             | Parameters.Typed o -> JsonConvert.SerializeObject o
-        let withTemplate =
+        let tryCreateRg, withTemplate =
             let definition =
                 resourceManager
                     .Deployments
                     .Define(deployment.DeploymentName.Replace(" ", "_"))
             match deployment.ResourceGroup with
-            | New (name, region) -> definition.WithNewResourceGroup(name, region)
-            | Existing name -> definition.WithExistingResourceGroup(name)
+            | New (name, region) ->
+                let tryCreateRg() = resourceManager.ResourceGroups.Define(name).WithRegion(region).Create() |> ignore
+                tryCreateRg, definition.WithNewResourceGroup(name, region)
+            | Existing name -> ignore, definition.WithExistingResourceGroup(name)
 
+        tryCreateRg()
         withTemplate            
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(parameters)
@@ -109,8 +113,9 @@ let authenticate credentials (subscriptionId:Guid) =
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
 let deployWithProgress authContext =
-    create authContext
-    >> fun fluent -> fluent.BeginCreate()
+    buildDefinition authContext
+    >> fun fluent ->
+        fluent.BeginCreate()
     >> monitorDeployment
 
 /// Deploys an ARM template, returning any outputs.
