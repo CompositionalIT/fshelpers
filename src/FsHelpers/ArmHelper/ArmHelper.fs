@@ -20,11 +20,11 @@ module Parameters =
         | ArmInt i -> toBoxedPValue i
         | ArmBool b -> toBoxedPValue b
 
-type OutputResult = { Type : string; Value : string }
-type DeploymentOutputs = Map<string, string>
+type DeploymentOutputs<'T> = Map<string, Parameters.ParameterValue<'T>>
+type SimpleOutput = DeploymentOutputs<obj>
 type AuthenticationCredentials = { ClientId : Guid; ClientSecret : string; TenantId : Guid }
 type DeviceAuthenticationCredentials = { ClientId : Guid; TenantId : Guid option }
-type DeploymentStatus = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:DeploymentOutputs
+type DeploymentStatus<'T> = DeploymentInProgress of state:string * operations:int | DeploymentError of statusCode:string * message:string | DeploymentCompleted of deployment:'T
 type DeploymentMode =
     | Complete | Incremental
     member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
@@ -53,12 +53,12 @@ module Internal =
         |> Map
         |> JsonConvert.SerializeObject
 
-    let toDeploymentOutputs : obj -> DeploymentOutputs = function
+    let toDeploymentOutputs : obj -> _ = function
         | :? JObject as outputs ->
             outputs
             |> string
-            |> Newtonsoft.Json.JsonConvert.DeserializeObject<Map<string, OutputResult>>
-            |> Map.map(fun _ v -> v.Value)
+            |> fun s -> Some(Newtonsoft.Json.JsonConvert.DeserializeObject<'T> s)
+        | null -> None
         | _ -> failwith "Unknown output type!"
 
     let rec monitorDeployment (deployment:IDeployment) = seq {
@@ -80,25 +80,23 @@ module Internal =
             failwith "Failed to complete deployment successfully."
         | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
 
-    let create (AuthenticatedContext resourceManager) deployment =
+    let buildDefinition (AuthenticatedContext resourceManager) deployment =
         let parameters =
             match deployment.Parameters with
             | Parameters.Simple parameters -> buildArmParameters parameters
-            | Parameters.Typed object -> JsonConvert.SerializeObject object
-        match deployment.ResourceGroup with
-        | ResourceGroupType.New(name, region) ->
-            resourceManager.ResourceGroups.Define(name).WithRegion(region).Create() |> ignore
-        | _ -> ()
-
-        let withTemplate =
+            | Parameters.Typed o -> JsonConvert.SerializeObject o
+        let tryCreateRg, withTemplate =
             let definition =
                 resourceManager
                     .Deployments
                     .Define(deployment.DeploymentName.Replace(" ", "_"))
             match deployment.ResourceGroup with
-            | New (name, region) -> definition.WithNewResourceGroup(name, region)
-            | Existing name -> definition.WithExistingResourceGroup(name)
+            | New (name, region) ->
+                let tryCreateRg() = resourceManager.ResourceGroups.Define(name).WithRegion(region).Create() |> ignore
+                tryCreateRg, definition.WithNewResourceGroup(name, region)
+            | Existing name -> ignore, definition.WithExistingResourceGroup(name)
 
+        tryCreateRg()
         withTemplate            
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(parameters)
@@ -138,8 +136,9 @@ let authenticateDevice (showMessagePrompt:string -> unit) credentials (subscript
 
 /// Deploys an ARM template, providing a stream of progress updates and culminating with any outputs.
 let deployWithProgress authContext =
-    create authContext
-    >> fun fluent -> fluent.BeginCreate()
+    buildDefinition authContext
+    >> fun fluent ->
+        fluent.BeginCreate()
     >> monitorDeployment
 
 /// Deploys an ARM template, returning any outputs.
