@@ -8,7 +8,7 @@
   <ItemGroup>
     <Compile Include="ArmHelper\ArmHelper.fs" />
     <Compile Include="JsonHelper\JsonHelper.fs" />
-    <None Include="Script.fsx" />
+    <Compile Include="Elmish.Debounce\Elmish.Debounce.fs" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
