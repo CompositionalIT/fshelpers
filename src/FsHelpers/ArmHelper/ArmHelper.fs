@@ -77,7 +77,7 @@ module Internal =
                     | _ -> None)
                 |> Seq.map DeploymentError
             failwith "Failed to complete deployment successfully."
-        | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) }
+        | Succeeded -> yield DeploymentCompleted (deployment.Outputs |> toDeploymentOutputs) } |> Seq.distinct
 
     let buildDefinition (AuthenticatedContext resourceManager) deployment =
         let parameters =
