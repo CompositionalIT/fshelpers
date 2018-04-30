@@ -3,3 +3,5 @@ source https://www.nuget.org/api/v2
 framework: >= net461
 nuget FSharp.Core
 nuget Microsoft.Azure.Management.ResourceManager.Fluent
+nuget Microsoft.IdentityModel.Clients.ActiveDirectory
+nuget Fable.Elmish
