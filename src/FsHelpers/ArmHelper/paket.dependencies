@@ -1,1 +1,1 @@
-nuget Microsoft.Azure.Management.ResourceManager.Fluent
+nuget Microsoft.Azure.Management.ResourceManager.Fluent 1.4.1
