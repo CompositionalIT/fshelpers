@@ -101,7 +101,7 @@ module Internal =
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(parameters)
             .WithMode(deployment.DeploymentMode.AsFluent)
-
+    
 open Internal
 open Microsoft.Azure.Management.ResourceManager.Fluent.Core
 open Microsoft.Rest
@@ -159,3 +159,8 @@ let createSimple name resourceGroup region template parameters =
 let deploySimple name resourceGroup region template parameters auth =
     createSimple name resourceGroup region template parameters
     |> deploy auth
+
+/// Deletes an entire resource group (and all child resources).
+let deleteResourceGroup (AuthenticatedContext resourceManager) (name:string) =
+    resourceManager.ResourceGroups.BeginDeleteByName name
+
