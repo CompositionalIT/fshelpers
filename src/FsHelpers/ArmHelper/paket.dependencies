@@ -1,1 +1,2 @@
 nuget Microsoft.Azure.Management.ResourceManager.Fluent 1.4.1
+nuget Microsoft.Rest.ClientRuntime.Azure.Authentication 2.3.2
