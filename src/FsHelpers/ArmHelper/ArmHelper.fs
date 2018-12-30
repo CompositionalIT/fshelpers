@@ -107,17 +107,17 @@ open Microsoft.Azure.Management.ResourceManager.Fluent.Core
 open Microsoft.Rest
 open Microsoft.IdentityModel.Clients.ActiveDirectory
 
-/// Authenticates to Azure using the supplied credentials for a specific subscription.
-let authenticate (credentials:AuthenticationCredentials) (subscriptionId:Guid) =
+/// Authenticates a device to Azure which either doesn't have a web browser or doesn't have a mechanism for user input. Examples of these
+/// include either terminals or IoT devices
+let authenticateDevice (showMessagePrompt:string -> unit) credentials (subscriptionId:Guid) =
     let spi = AzureCredentialsFactory().FromServicePrincipal(string credentials.ClientId, credentials.ClientSecret, string credentials.TenantId, AzureEnvironment.AzureGlobalCloud)
     ResourceManager
         .Authenticate(spi)
         .WithSubscription(string subscriptionId)
         |> AuthenticatedContext
 
-/// Authenticates a device to Azure which either doesn't have a web browser or doesn't have a mechanism for user input. Examples of these
-/// include either terminals or IoT devices
-let authenticateDevice (showMessagePrompt:string -> unit) credentials (subscriptionId:Guid) =
+/// Authenticates to Azure using the supplied credentials for a specific subscription. You will be promted to go through an authentication process.
+let authenticate (credentials:AuthenticationCredentials) (subscriptionId:Guid) =
     let authority =
         sprintf "https://login.microsoftonline.com/%s" (match credentials.TenantId with Some tId -> tId.ToString() | None -> "common")
     let adalClient = AuthenticationContext(authority)
