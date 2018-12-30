@@ -108,7 +108,7 @@ open Microsoft.Rest
 open Microsoft.IdentityModel.Clients.ActiveDirectory
 
 /// Authenticates a device to Azure which either doesn't have a web browser or doesn't have a mechanism for user input. Examples of these
-/// include terminals, IoT devices, and uattended automated deployments
+/// include terminals, IoT devices, and unattended automated deployments
 let authenticateDevice (credentials:AuthenticationCredentials) (subscriptionId:Guid) =
     let spi = AzureCredentialsFactory().FromServicePrincipal(string credentials.ClientId, credentials.ClientSecret, string credentials.TenantId, AzureEnvironment.AzureGlobalCloud)
     ResourceManager
