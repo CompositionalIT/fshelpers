@@ -14,7 +14,7 @@ module Parameters =
     | ArmString of string
     | ArmInt of int
     | ArmBool of bool
-    type ParameterType = Simple of (string * ArmParameter) list | Typed of obj
+    type [<NoComparison>] ParameterType = Simple of (string * ArmParameter) list | Typed of obj
     let rec getArmParameterValue = function
         | ArmString s -> toBoxedPValue s
         | ArmInt i -> toBoxedPValue i
@@ -28,15 +28,15 @@ type DeploymentStatus<'T> = DeploymentInProgress of state:string * operations:in
 type DeploymentMode =
     | Complete | Incremental
     member this.AsFluent = match this with | Complete -> Models.DeploymentMode.Complete | Incremental -> Models.DeploymentMode.Incremental
-type ResourceGroupType =
+type [<NoComparison>] ResourceGroupType =
     | New of name:string * Core.Region | Existing of name:string
-type Deployment =
+type [<NoComparison>] Deployment =
     { DeploymentName : string
       ResourceGroup : ResourceGroupType
       ArmTemplate : string
       Parameters : Parameters.ParameterType
       DeploymentMode : DeploymentMode }
-type AuthenticatedContext = AuthenticatedContext of IResourceManager
+type [<NoComparison>] AuthenticatedContext = AuthenticatedContext of IResourceManager
 
 module Internal =
     let (|Accepted|Running|Succeeded|Failed|Other|) = function
@@ -66,7 +66,7 @@ module Internal =
         let operations = deployment.DeploymentOperations.List() |> Seq.toArray
         yield DeploymentInProgress(deployment.ProvisioningState, operations.Length)
         match deployment.ProvisioningState with
-        | Running | Accepted | Other _ ->            
+        | Running | Accepted | Other _ ->
             Async.Sleep 5000 |> Async.RunSynchronously
             yield! monitorDeployment deployment
         | Failed ->
@@ -97,11 +97,11 @@ module Internal =
             | Existing name -> ignore, definition.WithExistingResourceGroup(name)
 
         tryCreateRg()
-        withTemplate            
+        withTemplate
             .WithTemplate(deployment.ArmTemplate)
             .WithParameters(parameters)
             .WithMode(deployment.DeploymentMode.AsFluent)
-    
+
 open Internal
 open Microsoft.Azure.Management.ResourceManager.Fluent.Core
 open Microsoft.Rest
