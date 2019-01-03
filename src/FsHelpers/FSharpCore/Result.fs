@@ -1,12 +1,33 @@
+[<RequireQualifiedAccess>]
 module FSharp.Core.Result
 
 let private doBindExn errorMapper func =
     try func()
     with ex -> ex |> errorMapper |> Error
+
+let inline private ignoreResult (_:Result<_,_>) = ()
+
+/// Replaces a failure case with a default result.
+let withDefault defaultResult = function Ok v -> v | Error _ -> defaultResult
+/// Tests if a Result is Ok
+let isOk = function Ok _ -> true | _ -> false
+/// Tests if a Result is an Error
+let isError result = result |> isOk |> not
+
+/// Performs side-effectful actions e.g. logging on both Ok and failure cases.
+let sideEffect (onOk:_ -> unit) (onError:_ -> unit) result =
+    match result with
+    | Ok v as s -> onOk v; s
+    | Error errors as e -> onError errors; e
+
+/// Perform a side-effectful operation on a Result.
+let iter (mapper:_ -> unit) result = result |> Result.map mapper |> ignoreResult
+
 /// Converts exceptions to Errors for functions that already return a Result.
 let bindExn errorMapper func = doBindExn errorMapper func
 /// Converts exceptions to Errors for standard (non-Result) functions with the ability to specify the error type.
 let ofExn errorMapper func = (func >> Ok) |> bindExn errorMapper
+
 /// Combines two results into a tupled Ok. If both sides error, the first one is taken.
 let inline combine resultB resultA =
     match resultA, resultB with
@@ -28,10 +49,13 @@ let inline ofOption msg = function Some x -> Ok x | None -> Error msg
 let inline ofOptionValue msg = function ValueSome x -> Ok x | ValueNone -> Error msg
 /// Converts Some -> Ok and None -> Error, lazily generating the error msg.
 let inline ofOptionL getMsg = function Some x -> Ok x | None -> Error (getMsg())
-let inline private ignoreResult (_:Result<_,_>) = ()
-/// Perform a side-effectful operation on a Result.
-let iter (mapper:_ -> unit) result = result |> Result.map mapper |> ignoreResult
-/// Explodes a Result<List 'T> into a List<Result 'T>.
+/// Converts Ok -> Some and Error -> None
+let toOption = function Ok x -> Some x | Error _ -> None
+/// Converts a result to an option, logging any errors before converting to None.
+let toOptionLog logger =
+    let sideEffect = sideEffect ignore logger
+    sideEffect >> toOption
+/// Expands a Result<List 'T> into a List<Result 'T>.
 let expand = function
     | Ok res -> res |> Seq.map Ok |> Seq.toArray
     | Error x -> [| Error x |]
@@ -44,7 +68,6 @@ let inline partition results =
         | Ok v -> oks.Add v
         | Error err -> errors.Add err)
     oks.ToArray(), errors.ToArray()
-let inline private sortedDistinct x = x |> Array.distinct |> Array.sort
 /// Merges results so that List<Result 'T> becomes Result<List 'T>. A single error will in the list will prevent Ok.
 let inline merge results =
     match partition results with
@@ -59,28 +82,16 @@ let inline mergeOptimistic results =
     | [||], [||] -> Ok [||]
     | [||], errors -> Error (Array.distinct errors)
     | oks, _ -> Ok oks
-let toOption = function Ok x -> Some x | Error _ -> None
-/// Performs side-effectful actions e.g. logging on both Ok and failure cases.
-let sideEffect (onOk:_ -> unit) (onError:_ -> unit) result =
-    match result with
-    | Ok v as s -> onOk v; s
-    | Error errors as e -> onError errors; e
 /// Removes any errors from a list of results, allowing you to log them as needed.
-let inline cleanse logger describeError results =
+let inline cleanse logger results =
     let oks, errors = results |> partition
-    errors |> Array.distinct |> Array.iter(describeError >> logger)
+    errors |> Array.distinct |> Array.iter(logger)
     oks
-/// Converts a result to an option, logging any errors before converting to None.
-let toOptionLog logger =
-    let sideEffect = sideEffect ignore logger
-    sideEffect >> toOption
-/// Logs any errors of a side-effectful result before returning unit.
-let logErrorsIgnore logger describeError (results:Result<unit, _> seq) =
+/// Logs any errors of a collection of side-effectful results before returning unit.
+let cleanseSideEffects logger (results:Result<unit, _> seq) =
     results
-    |> cleanse logger describeError
+    |> cleanse logger
     |> ignore
-/// Replaces a failure case with a default result.
-let withDefault defaultResult = function Ok v -> v | Error _ -> defaultResult
+
+/// Ignores a Result
 let ignore = ignoreResult
-let isOk = function Ok _ -> true | _ -> false
-let isError result = result |> isOk |> not
